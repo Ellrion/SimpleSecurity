@@ -1,4 +1,4 @@
-SimpleSecutity
+SimpleSecurity
 ==============
 
-A very simple class that empliments security service
+A very simple class that implements security service
