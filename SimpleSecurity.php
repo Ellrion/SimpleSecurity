@@ -45,89 +45,114 @@ class SecurityService
 
     private function checkAccessLevel(&$accessLevel, $user, $prop = array())
     {
+        if (empty($accessLevel)) {
+            return $this->prepareAccessLevel($accessLevel, false);
+        }
         if (is_bool($accessLevel)) {
             return $accessLevel;
         }
-
-        if (empty($accessLevel)) {
-            $accessLevel = false;
-        } elseif (is_array($accessLevel)) {
-            $accessLevel = $this->checkAccessRule($accessLevel, $user, $prop);
-        } elseif (is_string($accessLevel)) {
-            $accessLevel = $this->checkAccessRole($accessLevel, $user, $prop);
-        } elseif (is_callable($accessLevel)) {
-            $accessLevel = $this->checkAccessStrategy($accessLevel, $user, $prop);
-        } else {
-            $accessLevel = true;
+        if (is_array($accessLevel)) {
+            return $this->prepareAccessLevel($accessLevel, $this->checkAccessRule($accessLevel, $user, $prop));
+        }
+        if (is_string($accessLevel)) {
+            return $this->prepareAccessLevel($accessLevel, $this->checkAccessRole($accessLevel, $user, $prop));
+        }
+        if (is_callable($accessLevel)) {
+            return $this->prepareAccessLevel($accessLevel, $this->checkAccessStrategy($accessLevel, $user, $prop));
         }
 
-        return !empty($accessLevel);
+        return $this->prepareAccessLevel($accessLevel, true);
+    }
+
+    private function prepareAccessLevel(&$accessLevel, $value)
+    {
+        return $accessLevel = !empty($value);
     }
 
     private function checkAccessRule(&$accessRule, $user, $prop = array())
     {
         if (empty($accessRule) || !is_array($accessRule)) {
-            $accessRule = false;
-        } else {
-            $accessRule = (
+            return $this->prepareAccessLevel($accessRule, false);
+        }
+
+        return $this->prepareAccessLevel(
+            $accessRule
+            , (
                 (!isset($accessRule['parent']) || $this->checkAccessLevel($accessRule['parent'], $user, $prop))
                 && (!isset($accessRule['allow']) || $this->checkAccessLevel($accessRule['allow'], $user, $prop))
                 && (!isset($accessRule['deny']) || !$this->checkAccessLevel($accessRule['deny'], $user, $prop))
-            );
-        }
-
-        return !empty($accessRule);
+            )
+        );
     }
 
     private function checkAccessRole(&$accessRole, $user, $prop = array())
     {
         if (empty($accessRole) || !is_string($accessRole)) {
-            $accessRole = false;
-        } else {
-            if (preg_match('~^([^\*\+\-]*)([\*\+\-]{1})(.*)$~', $accessRole, $matches)) {
-                $head = $matches[1];
-                $sign = $matches[2];
-                $tail = $matches[3];
-                if ('+' === $sign) {
-                    $accessRole = $this->checkAccessRole($head, $user, $prop)
-                        || $this->checkAccessRole($tail, $user, $prop);
-                } elseif ('-' === $sign) {
-                    $accessRole = $this->checkAccessRole($head, $user, $prop)
-                        && !$this->checkAccessRole($tail, $user, $prop);
-                } elseif ('*' === $sign) {
-                    $accessRole = $this->checkAccessRole($head, $user, $prop)
-                        && $this->checkAccessRole($tail, $user, $prop);
-                }
-            } elseif (strpos($accessRole, ':')) {
-                $role_parts = explode(':', $accessRole, 2);
-                if (!isset($this->cachedRolesList[$role_parts[0].':'])) {
-                    $accessRole = false;
-                } else {
-                    $this->cachedRolesList[$accessRole] = $this->cachedRolesList[$role_parts[0].':'];
-                    $prop = array_merge($prop, array($role_parts[0]=>$role_parts[1]));
+            return $this->prepareAccessLevel($accessRole, false);
+        }
 
-                    $accessRole = $accessRole = $this->checkAccessLevel($this->cachedRolesList[$accessRole], $user, $prop);
-                }
-            } elseif (!isset($this->cachedRolesList[$accessRole])) {
-                $accessRole = false;
-            } else {
-                $accessRole = $this->checkAccessLevel($this->cachedRolesList[$accessRole], $user, $prop);
+        if (isset($this->cachedRolesList[$accessRole])) {
+            return $this->prepareAccessLevel(
+                $accessRole
+                , $this->checkAccessLevel($this->cachedRolesList[$accessRole], $user, $prop)
+            );
+        }
+
+        if (($key = array_search($accessRole, $this->cachedRolesList, true)) !== false) {
+            unset($this->cachedRolesList[$key]);
+            $this->cachedRolesList[$accessRole] = true;
+            return $this->prepareAccessLevel($accessRole, true);
+        }
+
+        if (preg_match('~^([^\*\+\-]*)([\*\+\-]{1})(.*)$~', $accessRole, $matches)) {
+            $head = $matches[1];
+            $sign = $matches[2];
+            $tail = $matches[3];
+            if ('+' === $sign) {
+                return $this->prepareAccessLevel(
+                    $accessRole
+                    , $this->checkAccessRole($head, $user, $prop) || $this->checkAccessRole($tail, $user, $prop)
+                );
+            }
+            if ('-' === $sign) {
+                return $this->prepareAccessLevel(
+                    $accessRole
+                    , $this->checkAccessRole($head, $user, $prop) && !$this->checkAccessRole($tail, $user, $prop)
+                );
+            }
+            if ('*' === $sign) {
+                return $this->prepareAccessLevel(
+                    $accessRole
+                    , $this->checkAccessRole($head, $user, $prop) && $this->checkAccessRole($tail, $user, $prop)
+                );
             }
         }
 
-        return !empty($accessRole);
+        if (strpos($accessRole, ':')) {
+            $role_parts = explode(':', $accessRole, 2);
+            if (!isset($this->cachedRolesList[$role_parts[0].':'])) {
+                return $this->prepareAccessLevel($accessRole, false);
+            }
+            $this->cachedRolesList[$accessRole] = $this->cachedRolesList[$role_parts[0].':'];
+            $prop = array_merge($prop, array($role_parts[0]=>$role_parts[1]));
+            return $this->prepareAccessLevel(
+                $accessRole
+                , $this->checkAccessLevel($this->cachedRolesList[$accessRole], $user, $prop)
+            );
+        }
+
+
+        return $this->prepareAccessLevel($accessRole, false);
     }
 
     private function checkAccessStrategy(&$accessStrategy, $user, $prop = array())
     {
         if (empty($accessStrategy) || !is_callable($accessStrategy)) {
-            $accessStrategy = false;
-        } else {
-            $accessStrategy = $accessStrategy($user, $prop);
+            return $this->prepareAccessLevel($accessStrategy, false);
         }
-        $accessStrategy = $this->checkAccessLevel($accessStrategy, $user, $prop);
+        $accessStrategy = $accessStrategy($user, $prop);
 
-        return !empty($accessStrategy);
+        return $this->prepareAccessLevel($accessStrategy, $this->checkAccessLevel($accessStrategy, $user, $prop));
 
     }
 }
