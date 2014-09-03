@@ -85,6 +85,17 @@ class SecurityService
         );
     }
 
+    private function checkAccessStrategy(&$accessStrategy, $user, $prop = array())
+    {
+        if (empty($accessStrategy) || !is_callable($accessStrategy)) {
+            return $this->prepareAccessLevel($accessStrategy, false);
+        }
+        $accessStrategy = $accessStrategy($user, $prop);
+
+        return $this->prepareAccessLevel($accessStrategy, $this->checkAccessLevel($accessStrategy, $user, $prop));
+
+    }
+
     private function checkAccessRole(&$accessRole, $user, $prop = array())
     {
         if (empty($accessRole) || !is_string($accessRole)) {
@@ -104,28 +115,8 @@ class SecurityService
             return $this->prepareAccessLevel($accessRole, true);
         }
 
-        if (preg_match('~^([^\*\+\-]*)([\*\+\-]{1})(.*)$~', $accessRole, $matches)) {
-            $head = $matches[1];
-            $sign = $matches[2];
-            $tail = $matches[3];
-            if ('+' === $sign) {
-                return $this->prepareAccessLevel(
-                    $accessRole
-                    , $this->checkAccessRole($head, $user, $prop) || $this->checkAccessRole($tail, $user, $prop)
-                );
-            }
-            if ('-' === $sign) {
-                return $this->prepareAccessLevel(
-                    $accessRole
-                    , $this->checkAccessRole($head, $user, $prop) && !$this->checkAccessRole($tail, $user, $prop)
-                );
-            }
-            if ('*' === $sign) {
-                return $this->prepareAccessLevel(
-                    $accessRole
-                    , $this->checkAccessRole($head, $user, $prop) && $this->checkAccessRole($tail, $user, $prop)
-                );
-            }
+        if (strpbrk($accessRole, '+-*')) {
+            return $this->prepareAccessLevel($accessRole, $this->checkAccessRoleExpr($accessRole, $user, $prop));
         }
 
         if (strpos($accessRole, ':')) {
@@ -145,14 +136,83 @@ class SecurityService
         return $this->prepareAccessLevel($accessRole, false);
     }
 
-    private function checkAccessStrategy(&$accessStrategy, $user, $prop = array())
+    private function checkAccessRoleExpr(&$accessRole, $user, $prop = array())
     {
-        if (empty($accessStrategy) || !is_callable($accessStrategy)) {
-            return $this->prepareAccessLevel($accessStrategy, false);
+        $expr = $this->prepareAccessRoleExpr($accessRole);
+        $stack = array();
+        while ($token = array_shift($expr)) {
+            if (in_array($token, ['*', '+', '-'])) {
+                if (count($stack) < 2) {
+                    return $this->prepareAccessLevel($accessRole, false);
+                }
+                $b = array_pop($stack);
+                $a = array_pop($stack);
+                switch ($token) {
+                    case '*':
+                        $res = $a && $b;
+                        break;
+                    case '+':
+                        $res = $a || $b;
+                        break;
+                    case '-':
+                        $res = $a && !$b;
+                        break;
+                }
+                array_push($stack, $res);
+            } else {
+                array_push($stack, $this->checkAccessRole($token, $user, $prop));
+            }
         }
-        $accessStrategy = $accessStrategy($user, $prop);
+        if (count($stack) > 1) {
+            return $this->prepareAccessLevel($accessRole, false);
+        }
 
-        return $this->prepareAccessLevel($accessStrategy, $this->checkAccessLevel($accessStrategy, $user, $prop));
+        return $this->prepareAccessLevel($accessRole, array_pop($stack));
+    }
 
+    protected function prepareAccessRoleExpr($accessRoleExpr) {
+        $expr = array_map(
+            'trim'
+            , preg_split('/([\+\-\*\(\)])|\s+/', $accessRoleExpr, null, PREG_SPLIT_NO_EMPTY | PREG_SPLIT_DELIM_CAPTURE)
+        );
+
+        $precedence = [
+            '(' => 0,
+            ')' => 0,
+            '-' => 3,
+            '+' => 3,
+            '*' => 6
+        ];
+
+        $final_stack = [];
+        $operator_stack = [];
+
+        while ($token = array_shift($expr)) {
+            if (in_array($token, ['*', '+', '-'])) {
+                $top = end($operator_stack);
+                if ($top && $precedence[$token] <= $precedence[$top]) {
+                    $operator = array_pop($operator_stack);
+                    array_push($final_stack, $operator);
+                }
+                array_push($operator_stack, $token);
+            } elseif ('(' === $token) {
+                array_push($operator_stack, $token);
+            } elseif (')' === $token) {
+                do {
+                    $operator = array_pop($operator_stack);
+                    if ($operator == '(') {
+                        break;
+                    }
+                    array_push($final_stack, $operator);
+                } while ($operator);
+            } else {
+                array_push($final_stack, $token);
+            }
+        }
+        while ($operator = array_pop($operator_stack)) {
+            array_push($final_stack, $operator);
+        }
+
+        return $final_stack;
     }
 }
