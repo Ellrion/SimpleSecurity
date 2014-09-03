@@ -98,7 +98,7 @@ class SecurityService
             );
         }
 
-        if (($key = array_search($accessRole, $this->cachedRolesList, true)) !== false) {
+        if (($key = array_search($accessRole, $this->cachedRolesList, true)) !== false && is_int($key)) {
             unset($this->cachedRolesList[$key]);
             $this->cachedRolesList[$accessRole] = true;
             return $this->prepareAccessLevel($accessRole, true);
