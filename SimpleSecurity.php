@@ -157,6 +157,7 @@ class SecurityService
                     case '-':
                         $res = $a && !$b;
                         break;
+                    default: $res = false;
                 }
                 array_push($stack, $res);
             } else {
