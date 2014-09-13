@@ -145,21 +145,21 @@ class SecurityService
                 if (count($stack) < 2) {
                     return $this->prepareAccessLevel($accessRole, false);
                 }
-                $b = array_pop($stack);
-                $a = array_pop($stack);
+                $operand_b = array_pop($stack);
+                $operand_a = array_pop($stack);
                 switch ($token) {
                     case '*':
-                        $res = $a && $b;
+                        $result = $operand_a && $operand_b;
                         break;
                     case '+':
-                        $res = $a || $b;
+                        $result = $operand_a || $operand_b;
                         break;
                     case '-':
-                        $res = $a && !$b;
+                        $result = $operand_a && !$operand_b;
                         break;
-                    default: $res = false;
+                    default: $result = false;
                 }
-                array_push($stack, $res);
+                array_push($stack, $result);
             } else {
                 array_push($stack, $this->checkAccessRole($token, $user, $prop));
             }
